@@ -39,3 +39,17 @@ public:
   void addTransition(StateTransition *trans, int from, int to);
 };
 
+class ComplexState : public State
+{
+  StateMachine *sm;
+public:
+  ComplexState(StateMachine *sm) : sm(sm) {}
+  ~ComplexState() {delete sm;}
+
+  void enter() const override {}
+  void exit() const override {}
+  void act(float dt, flecs::world& ecs, flecs::entity entity) const override
+  {
+    sm->act(dt, ecs, entity);
+  }
+};

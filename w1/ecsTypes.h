@@ -59,7 +59,13 @@ enum Actions
   EA_MOVE_DOWN,
   EA_MOVE_UP,
   EA_MOVE_END,
-  EA_ATTACK = EA_MOVE_END,
+  EA_ATTACK,
+  EA_HEAL,
+  EA_SPLIT,
+  EA_EAT,
+  EA_SLEEP,
+  EA_CRAFT,
+  EA_SELL,
   EA_NUM
 };
 
@@ -79,9 +85,39 @@ struct MeleeDamage
   float damage = 2.f;
 };
 
-struct HealAmount
+struct RangedAttack
+{
+  float damage = 15.f;
+  float range = 5.f;
+};
+
+struct HealPickup
 {
   float amount = 0.f;
+};
+
+struct Heal
+{
+  float amount = 0.f;
+  float range = 1.f;
+  int cooldown = 10;
+  int curCooldown = 10;
+};
+
+struct CraftsmanStatuses
+{
+  int hunger = 0;
+  int sleepiness = 0;
+  int craftTimeRemaining = 0;
+};
+
+struct CraftsmanConsts
+{
+  Position eatPos = {-5, -5};
+  Position sleepPos = {-5, -7};
+  Position craftPos = {-7, -5};
+  Position sellPos = {-7, -7};
+  int maxCraftTime = 3;
 };
 
 struct PowerupAmount
@@ -103,6 +139,11 @@ struct Symbol
 };
 
 struct IsPlayer {};
+
+struct IsSlime
+{
+  bool canSplit = true;
+};
 
 struct Team
 {
