@@ -186,10 +186,152 @@ static std::vector<Position> find_path_a_star(const char *input, size_t width, s
   return std::vector<Position>();
 }
 
-void draw_nav_data(const char *input, size_t width, size_t height, Position from, Position to, float weight)
+std::vector<Position> find_path_awa_star(const char* input, size_t width, size_t height, Position from, Position to, float weight)
+{
+  if (from.x < 0 || from.y < 0 || from.x >= int(width) || from.y >= int(height) || input[coord_to_idx(from.x, from.y, width)] == '#' ||
+      to.x < 0 || to.y < 0 || to.x >= int(width) || to.y >= int(height) || input[coord_to_idx(to.x, to.y, width)] == '#')
+    return std::vector<Position>();
+  size_t inpSize = width * height;
+
+  std::vector<float> g(inpSize, std::numeric_limits<float>::max());
+  std::vector<float> f(inpSize, std::numeric_limits<float>::max());
+  std::vector<float> fPrime(inpSize, std::numeric_limits<float>::max()); //f'
+  std::vector<Position> prev(inpSize, {-1,-1});
+
+  auto getG = [&](Position p) -> float { return g[coord_to_idx(p.x, p.y, width)]; };
+  auto getF = [&](Position p) -> float { return f[coord_to_idx(p.x, p.y, width)]; };
+  auto getFPrime = [&](Position p) -> float { return fPrime[coord_to_idx(p.x, p.y, width)]; };
+
+  g[coord_to_idx(from.x, from.y, width)] = 0;
+  f[coord_to_idx(from.x, from.y, width)] = heuristic(from, to);
+  fPrime[coord_to_idx(from.x, from.y, width)] = weight * heuristic(from, to);
+
+  std::vector<Position> openList = {from};
+  std::vector<Position> closedList;
+
+  Position incumPos = {-1, -1};
+  int solutions = 0;
+  constexpr int maxSolutions = 10;
+
+  while (!openList.empty())
+  {
+    size_t bestIdx = 0;
+    float bestScore = getFPrime(openList[0]);
+    for (size_t i = 1; i < openList.size(); ++i)
+    {
+      float score = getFPrime(openList[i]);
+      if (score < bestScore)
+      {
+        bestIdx = i;
+        bestScore = score;
+      }
+    }
+    Position curPos = openList[bestIdx];
+    openList.erase(openList.begin() + bestIdx);
+
+    if (incumPos == Position{-1, -1} || getF(curPos) < getF(incumPos))
+    {
+      if (std::find(closedList.begin(), closedList.end(), curPos) == closedList.end())
+        closedList.emplace_back(curPos);
+      size_t idx = coord_to_idx(curPos.x, curPos.y, width);
+      const Rectangle rect = {float(curPos.x), float(curPos.y), 1.f, 1.f};
+      DrawRectangleRec(rect, Color{uint8_t(g[idx]), uint8_t(g[idx]), 0, 100});
+      auto checkNeighbour = [&](Position p)
+      {
+        // out of bounds
+        if (p.x < 0 || p.y < 0 || p.x >= int(width) || p.y >= int(height))
+          return;
+        size_t idx = coord_to_idx(p.x, p.y, width);
+        // not empty
+        if (input[idx] == '#')
+          return;
+        float edgeWeight = input[idx] == 'o' ? 10.f : 1.f;
+        float gScore = getG(curPos) + 1.f * edgeWeight; // we're exactly 1 unit away
+        if (incumPos != Position{-1, -1} && gScore + heuristic(p, to) >= getF(incumPos))
+          return;
+        if (p == to)
+        {
+          g[idx] = gScore;
+          f[idx] = gScore;
+          fPrime[idx] = gScore;
+          incumPos = p;
+          prev[idx] = curPos;
+          ++solutions;
+        }
+        else
+        {
+          bool foundOpen = std::find(openList.begin(), openList.end(), p) != openList.end();
+          bool foundClosed = std::find(closedList.begin(), closedList.end(), p) != closedList.end();
+          if (!foundOpen && !foundClosed || g[idx] > gScore)
+          {
+            g[idx] = gScore;
+            f[idx] = gScore + heuristic(p, to);
+            fPrime[idx] = gScore + weight * heuristic(p, to);
+            prev[idx] = curPos;
+            if (!foundOpen)
+              openList.emplace_back(p);
+            if (foundClosed)
+              closedList.erase(std::find(closedList.begin(), closedList.end(), p));
+          }
+        }
+      };
+      checkNeighbour({curPos.x + 1, curPos.y + 0});
+      checkNeighbour({curPos.x - 1, curPos.y + 0});
+      checkNeighbour({curPos.x + 0, curPos.y + 1});
+      checkNeighbour({curPos.x + 0, curPos.y - 1});
+    }
+    if (solutions >= maxSolutions)
+      break;
+  }
+  return solutions > 0 ? reconstruct_path(prev, to, width) : std::vector<Position>{};
+}
+
+std::vector<Position> find_path(const char* input, size_t width, size_t height, Position from, Position to, float weight, bool awa)
+{
+  return awa ? find_path_awa_star(input, width, height, from, to, weight) : find_path_a_star(input, width, height, from, to, weight);
+}
+
+std::vector<float> create_probabilities(size_t width, size_t height, int nMapGens, int numWeights, float step, bool awa)
+{
+  char* navGrid = new char[width * height];
+  std::vector<float> probabilities(numWeights, 0.f);
+  for (int i = 0; i < nMapGens; ++i)
+  {
+    if (i % 10 == 0)
+      printf("Please wait, %i/%i tests done\n", i, nMapGens);
+    gen_drunk_dungeon(navGrid, width, height, 24, 100, false);
+    spill_drunk_water(navGrid, width, height, 8, 10);
+
+    Position from = dungeon::find_walkable_tile(navGrid, width, height);
+    Position to = dungeon::find_walkable_tile(navGrid, width, height);
+
+    float curWeight = 1.f;
+    std::vector<Position> basePath = find_path(navGrid, width, height, from, to, 1.f, awa);
+
+    for (int j = 0; j < numWeights; ++j)
+    {
+      curWeight += step;
+      std::vector<Position> path = find_path(navGrid, width, height, from, to, curWeight, awa);
+      if (path == basePath)
+        probabilities[j] += 1.f / float(nMapGens);
+    }
+  }
+  return probabilities;
+}
+
+float choose_weight(const std::vector<float> &probabilities, int numWeights, float step, float targetProb)
+{
+  float bestWeightIdx = 0;
+  for (int i = 1; i < numWeights; ++i)
+    if (int(probabilities[i] * 100.f + 0.5f) >= int(targetProb * 100.f + 0.5f))
+      bestWeightIdx = i;
+  return 1.f + float(bestWeightIdx) * step;
+}
+
+void draw_nav_data(const char *input, size_t width, size_t height, Position from, Position to, float weight, bool awa = true)
 {
   draw_nav_grid(input, width, height);
-  std::vector<Position> path = find_path_a_star(input, width, height, from, to, weight);
+  std::vector<Position> path = find_path(input, width, height, from, to, weight, awa);
   //std::vector<Position> path = find_ida_star_path(input, width, height, from, to);
   draw_path(path);
 }
@@ -215,6 +357,10 @@ int main(int /*argc*/, const char ** /*argv*/)
   gen_drunk_dungeon(navGrid, dungWidth, dungHeight, 24, 100);
   spill_drunk_water(navGrid, dungWidth, dungHeight, 8, 10);
   float weight = 1.f;
+  bool awa = true;
+  constexpr int nMapsGen = 100;
+  constexpr int numWeights = 20;
+  constexpr float weightStep = 0.1;
 
   Position from = dungeon::find_walkable_tile(navGrid, dungWidth, dungHeight);
   Position to = dungeon::find_walkable_tile(navGrid, dungWidth, dungHeight);
@@ -222,6 +368,15 @@ int main(int /*argc*/, const char ** /*argv*/)
   Camera2D camera = { {0, 0}, {0, 0}, 0.f, 1.f };
   //camera.offset = Vector2{ width * 0.5f, height * 0.5f };
   camera.zoom = float(height) / float(dungHeight);
+
+  if (!awa)
+  {
+    std::vector<float> probabilities = create_probabilities(dungWidth, dungHeight, nMapsGen, numWeights, weightStep, awa);
+    printf("Optimal weight for probability 99%: %f\n", choose_weight(probabilities, numWeights, weightStep, 0.99));
+    printf("Optimal weight for probability 95%: %f\n", choose_weight(probabilities, numWeights, weightStep, 0.95));
+    printf("Optimal weight for probability 90%: %f\n", choose_weight(probabilities, numWeights, weightStep, 0.90));
+    printf("Optimal weight for probability 75%: %f\n", choose_weight(probabilities, numWeights, weightStep, 0.75));
+  }
 
   SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
   while (!WindowShouldClose())
@@ -262,10 +417,20 @@ int main(int /*argc*/, const char ** /*argv*/)
       weight = std::max(1.f, weight - 0.1f);
       printf("new weight %f\n", weight);
     }
+    if (IsKeyPressed(KEY_A))
+    {
+      awa = false;
+      printf("using A*\n");
+    }
+    if (IsKeyPressed(KEY_W))
+    {
+      awa = true;
+      printf("using AWA*\n");
+    }
     BeginDrawing();
       ClearBackground(BLACK);
       BeginMode2D(camera);
-        draw_nav_data(navGrid, dungWidth, dungHeight, from, to, weight);
+        draw_nav_data(navGrid, dungWidth, dungHeight, from, to, weight, awa);
       EndMode2D();
     EndDrawing();
   }
