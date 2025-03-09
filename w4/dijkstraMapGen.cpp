@@ -1,6 +1,7 @@
 #include "dijkstraMapGen.h"
 #include "ecsTypes.h"
 #include "dungeonUtils.h"
+#include "math.h"
 
 template<typename Callable>
 static void query_dungeon_data(flecs::world &ecs, Callable c)
@@ -19,6 +20,7 @@ static void query_characters_positions(flecs::world &ecs, Callable c)
 }
 
 constexpr float invalid_tile_value = 1e5f;
+constexpr float forbidden_tile_value = 1e6f;
 
 static void init_tiles(std::vector<float> &map, const DungeonData &dd)
 {
@@ -66,28 +68,58 @@ static void process_dmap(std::vector<float> &map, const DungeonData &dd)
   }
 }
 
-void dmaps::gen_player_approach_map(flecs::world &ecs, std::vector<float> &map)
+void dmaps::gen_enemy_approach_map(flecs::world &ecs, std::vector<float> &map, int team)
 {
   query_dungeon_data(ecs, [&](const DungeonData &dd)
   {
     init_tiles(map, dd);
     query_characters_positions(ecs, [&](const Position &pos, const Team &t)
     {
-      if (t.team == 0) // player team hardcode
+      if (t.team != team)
         map[pos.y * dd.width + pos.x] = 0.f;
     });
     process_dmap(map, dd);
   });
 }
 
-void dmaps::gen_player_flee_map(flecs::world &ecs, std::vector<float> &map)
+void dmaps::gen_enemy_flee_map(flecs::world &ecs, std::vector<float> &map, int team)
 {
-  gen_player_approach_map(ecs, map);
+  gen_enemy_approach_map(ecs, map, team);
   for (float &v : map)
     if (v < invalid_tile_value)
       v *= -1.2f;
   query_dungeon_data(ecs, [&](const DungeonData &dd)
   {
+    process_dmap(map, dd);
+  });
+}
+
+void dmaps::gen_enemy_mage_map(flecs::world &ecs, std::vector<float> &map, float lowerBound, float upperBound, int team)
+{
+  query_dungeon_data(ecs, [&](const DungeonData &dd)
+  {
+    init_tiles(map, dd);
+    query_characters_positions(ecs, [&](const Position &pos, const Team &t)
+    {
+      if (t.team != team)
+      {
+        int yStart = std::max(pos.y - int(ceil(upperBound)), 0);
+        int yEnd = std::min(pos.y + int(ceil(upperBound)), int(dd.width) - 1);
+        int xStart = std::max(pos.x - int(ceil(upperBound)), 0);
+        int xEnd = std::min(pos.x + int(ceil(upperBound)), int(dd.height) - 1);
+        for (int y = yStart; y < yEnd; ++y)
+          for (int x = xStart; x < xEnd; ++x)
+          {
+            int posInMap = y * dd.width + x;
+            if (dd.tiles[posInMap] != dungeon::floor)
+              continue;
+            if (dist_sq(pos, Position{x, y}) <= sqr(lowerBound))
+              map[posInMap] = forbidden_tile_value;
+            else if (dist_sq(pos, Position{x, y}) <= sqr(upperBound) && map[posInMap] == invalid_tile_value)
+              map[posInMap] = 0;
+          }
+      }
+    });
     process_dmap(map, dd);
   });
 }
@@ -101,6 +133,26 @@ void dmaps::gen_hive_pack_map(flecs::world &ecs, std::vector<float> &map)
     hiveQuery.each([&](const Position &pos, const Hive &)
     {
       map[pos.y * dd.width + pos.x] = 0.f;
+    });
+    process_dmap(map, dd);
+  });
+}
+
+void dmaps::gen_exploration_map(flecs::world& ecs, std::vector<float>& map)
+{
+  static auto explorationQuery = ecs.query<const ExplorationMap>();
+  query_dungeon_data(ecs, [&](const DungeonData &dd)
+  {
+    init_tiles(map, dd);
+    explorationQuery.each([&](const ExplorationMap &expMap)
+    {
+      for (int i = 0; i < map.size(); ++i)
+      {
+        if (dd.tiles[i] != dungeon::floor)
+          continue;
+        if (!expMap.explored[i])
+          map[i] = 0.f;
+      }
     });
     process_dmap(map, dd);
   });

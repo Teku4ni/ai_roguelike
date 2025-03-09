@@ -71,6 +71,8 @@ enum Actions
   EA_MOVE_UP,
   EA_MOVE_END,
   EA_ATTACK = EA_MOVE_END,
+  EA_ATTACK_MAGIC,
+  EA_EXPLORE,
   EA_HEAL_SELF,
   EA_PASS,
   EA_NUM
@@ -92,6 +94,11 @@ struct MeleeDamage
   float damage = 2.f;
 };
 
+struct MagicDamage
+{
+  float damage = 3.f;
+};
+
 struct HealAmount
 {
   float amount = 0.f;
@@ -109,6 +116,7 @@ struct PlayerInput
   bool up = false;
   bool down = false;
   bool passed = false;
+  bool explore = false;
 };
 
 struct Symbol
@@ -150,6 +158,11 @@ struct DungeonData
 struct DijkstraMapData
 {
   std::vector<float> map;
+};
+
+struct ExplorationMap
+{
+  std::vector<bool> explored;
 };
 
 struct VisualiseMap {};
